@@ -1,5 +1,6 @@
 package com.example.spotifyplayer
 
+
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
@@ -23,12 +24,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -66,12 +70,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import com.example.spotifyplayer.ui.theme.SpotifyPlayerTheme
 import kotlinx.coroutines.delay
+
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Permitimos dibujar bajo notch/barra de sistema
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        // Hacemos transparente la barra de estado
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
         setContent {
             SpotifyPlayerTheme {
                 MainScreen()
@@ -79,6 +89,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -89,43 +101,57 @@ fun MainScreen() {
     var currentSongIndex by remember { mutableIntStateOf(-1) }
     var isPlaying by remember { mutableStateOf(false) }
 
-    // Usamos mediaPlayerRef para controlar el MediaPlayer sin provocar recomposiciones constantes
+    // MediaPlayer sin recomposiciones
     val mediaPlayerRef = remember { mutableStateOf<MediaPlayer?>(null) }
 
     var showPlayerDetail by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
-   
 
-    // Actualización periódica de 'progress' mientras suena la canción
+    // Reproducción automática al terminar pista
+    fun playWithAutoNext(index: Int) {
+        currentSongIndex = index
+        progress = 0f
+        isPlaying = true
+        playSong(mediaPlayerRef, songs[index])
+        mediaPlayerRef.value?.setOnCompletionListener {
+            if (currentSongIndex < songs.size - 1) {
+                playWithAutoNext(currentSongIndex + 1)
+            } else {
+                isPlaying = false
+            }
+        }
+    }
+
+    // Actualizamos progress periódicamente
     LaunchedEffect(mediaPlayerRef.value) {
         while (mediaPlayerRef.value != null) {
-            val mp = mediaPlayerRef.value!!
-            if (mp.isPlaying) {
-                progress = mp.currentPosition.toFloat() / mp.duration.toFloat()
+            mediaPlayerRef.value?.let { mp ->
+                if (mp.isPlaying) {
+                    progress = mp.currentPosition.toFloat() / mp.duration.toFloat()
+                }
             }
             delay(500L)
         }
     }
 
-    // Lanzador de permiso para Android 13+
+    // Permisos Android 13+
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         permissionGranted = isGranted
-        if (isGranted) {
-            songs = loadSongs(context)
-        }
+        if (isGranted) songs = loadSongs(context)
     }
 
-    // Solicitar permiso al iniciar
+    // Solicitar permiso
     LaunchedEffect(Unit) {
-        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             Manifest.permission.READ_MEDIA_AUDIO
-        } else {
+        else
             Manifest.permission.READ_EXTERNAL_STORAGE
-        }
 
-        if (ContextCompat.checkSelfPermission(context, permission) != PackageManager.PERMISSION_GRANTED) {
+        if (ContextCompat.checkSelfPermission(context, permission)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
             permissionLauncher.launch(permission)
         } else {
             permissionGranted = true
@@ -133,7 +159,7 @@ fun MainScreen() {
         }
     }
 
-    // Liberar mediaPlayer al cerrar la actividad
+    // Liberar mediaPlayer
     DisposableEffect(Unit) {
         onDispose {
             mediaPlayerRef.value?.release()
@@ -144,7 +170,10 @@ fun MainScreen() {
     val currentSong = songs.getOrNull(currentSongIndex)
 
     Scaffold(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            // Permitimos contenido bajo la barra de estado, solo evitamos la barra de navegación
+            .windowInsetsPadding(WindowInsets.navigationBars),
         bottomBar = {
             if (!showPlayerDetail && currentSong != null) {
                 BottomPlayerBar(
@@ -157,49 +186,33 @@ fun MainScreen() {
                         }
                     },
                     onPreviousClick = {
-                        if (currentSongIndex > 0) {
-                            currentSongIndex--
-                            isPlaying = true
-                            progress = 0f
-                            playSong(mediaPlayerRef, songs[currentSongIndex])
-                        }
+                        if (currentSongIndex > 0) playWithAutoNext(currentSongIndex - 1)
                     },
                     onNextClick = {
-                        if (currentSongIndex < songs.size - 1) {
-                            currentSongIndex++
-                            isPlaying = true
-                            progress = 0f
-                            playSong(mediaPlayerRef, songs[currentSongIndex])
-                        }
+                        if (currentSongIndex < songs.size - 1) playWithAutoNext(currentSongIndex + 1)
                     },
-                    onBarClick = {
-                        showPlayerDetail = true
-                    }
+                    onBarClick = { showPlayerDetail = true }
                 )
             }
         }
     ) { innerPadding ->
         Box(
-            modifier = Modifier
+            Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            if (permissionGranted) {
-                if (songs.isEmpty()) {
-                    Text("No se encontraron canciones 🎶", modifier = Modifier.padding(16.dp))
-                } else {
-                    SongList(songs = songs, onSongClick = { selected ->
-                        currentSongIndex = songs.indexOf(selected)
-                        isPlaying = true
-                        progress = 0f
-                        playSong(mediaPlayerRef, selected)
-                    })
-                }
-            } else {
-                Text(
+            when {
+                !permissionGranted -> Text(
                     "Necesitamos tu permiso para acceder a tu música.",
-                    modifier = Modifier.padding(16.dp)
+                    Modifier.padding(16.dp)
                 )
+                songs.isEmpty() -> Text(
+                    "No se encontraron canciones 🎶",
+                    Modifier.padding(16.dp)
+                )
+                else -> SongList(songs) { selected ->
+                    playWithAutoNext(songs.indexOf(selected))
+                }
             }
 
             AnimatedVisibility(
@@ -212,9 +225,8 @@ fun MainScreen() {
                     isPlaying = isPlaying,
                     progress = progress,
                     onSeekTo = { sliderPos ->
-                        val duration = mediaPlayerRef.value?.duration ?: 0
-                        val newPosMs = (duration * sliderPos).toInt()
-                        mediaPlayerRef.value?.seekTo(newPosMs)
+                        val dur = mediaPlayerRef.value?.duration ?: 0
+                        mediaPlayerRef.value?.seekTo((dur * sliderPos).toInt())
                     },
                     onPlayPauseClick = {
                         mediaPlayerRef.value?.let { mp ->
@@ -223,45 +235,27 @@ fun MainScreen() {
                         }
                     },
                     onPreviousClick = {
-                        if (currentSongIndex > 0) {
-                            currentSongIndex--
-                            isPlaying = true
-                            progress = 0f
-                            playSong(mediaPlayerRef, songs[currentSongIndex])
-                        }
+                        if (currentSongIndex > 0) playWithAutoNext(currentSongIndex - 1)
                     },
                     onNextClick = {
-                        if (currentSongIndex < songs.size - 1) {
-                            currentSongIndex++
-                            isPlaying = true
-                            progress = 0f
-                            playSong(mediaPlayerRef, songs[currentSongIndex])
-                        }
+                        if (currentSongIndex < songs.size - 1) playWithAutoNext(currentSongIndex + 1)
                     },
-                    onDismiss = {
-                        showPlayerDetail = false
-                    }
+                    onDismiss = { showPlayerDetail = false }
                 )
             }
         }
     }
 }
 
-/** Función para reproducir una canción usando mediaPlayerRef */
+/** Reproduce una canción */
 fun playSong(
     mediaPlayerState: androidx.compose.runtime.MutableState<MediaPlayer?>,
     song: Song
 ) {
-    // Liberar si ya existe un MediaPlayer
     mediaPlayerState.value?.release()
-
     mediaPlayerState.value = MediaPlayer().apply {
         setDataSource(song.data)
-        setOnPreparedListener {
-            start()
-        }
-        // Si deseas avanzar automáticamente a la siguiente pista al terminar:
-        // setOnCompletionListener { /* manejar avance */ }
+        setOnPreparedListener { start() }
         prepareAsync()
     }
 }
