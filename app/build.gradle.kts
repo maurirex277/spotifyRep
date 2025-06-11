@@ -50,12 +50,13 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
 
-
-
     // Icons y gráficos de Material
     implementation(libs.compose.icons.core)
     implementation(libs.compose.icons.extended)
 
+    // Coil para Compose (carga de imágenes)
+    //implementation("io.coil-kt:coil-compose:2.4.0") // versión recomendada, podés ajustar
+    implementation(libs.coil.compose)
 
     // Testing
     testImplementation(libs.junit)
